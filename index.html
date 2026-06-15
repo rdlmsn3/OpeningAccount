@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account Opening Checker</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        .log-slide-in { animation: slideIn 0.25s ease-out; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .audit-tab.active { color: #818cf8; background: rgba(99,102,241,0.1); border-bottom: 2px solid #6366f1; }
+        .audit-tab:not(.active) { border-bottom: 2px solid transparent; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen flex flex-col font-sans overflow-hidden">
+
+    <!-- ===== HEADER ===== -->
+    <header class="bg-slate-900 border-b border-slate-800 px-6 py-3 flex items-center justify-between shadow-2xl z-20">
+        <div class="flex items-center space-x-6">
+            <div class="flex items-center space-x-3">
+                <div class="w-3 h-3 bg-indigo-500 rounded-full shadow-[0_0_10px_#6366f1]"></div>
+                <span class="text-lg font-bold tracking-wider bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">Account Opening Checker</span>
+            </div>
+            
+            <div class="flex items-center space-x-2">
+                <input type="file" id="docFileInput" accept="image/*,application/pdf" class="hidden">
+                <label for="docFileInput" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2 rounded-lg cursor-pointer transition-all shadow-md text-xs tracking-wide uppercase">
+                    Upload PDF
+                </label>
+                <button id="scanAllDocsBtn" class="bg-cyan-700 hover:bg-cyan-600 text-white font-medium px-4 py-2 rounded-lg cursor-pointer transition-all shadow-md text-xs tracking-wide uppercase">
+                    Scan Directory
+                </button>
+                <button id="viewLogsBtn" class="bg-slate-700 hover:bg-slate-600 text-white font-medium px-4 py-2 rounded-lg cursor-pointer transition-all shadow-md text-xs tracking-wide uppercase flex items-center space-x-1.5">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                    <span>Log Viewer</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-4">
+            <div id="statusBadge" class="hidden text-[11px] font-mono px-3 py-1 rounded-md">
+                Ready for file input execution...
+            </div>
+            <button id="systemResetBtn" class="text-xs text-slate-400 hover:text-rose-400 font-medium uppercase tracking-wider transition-colors cursor-pointer">Reset</button>
+        </div>
+    </header>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="flex-1 flex overflow-hidden relative">
+        
+        <!-- LEFT: PDF Viewer -->
+        <section class="w-1/2 flex flex-col bg-slate-950 border-r border-slate-800 relative">
+            <div id="viewerToolbar" class="p-3 bg-slate-900/40 backdrop-blur-md border-b border-slate-800 flex justify-between items-center opacity-0 transition-opacity duration-300">
+                <span id="targetDocNameDisplay" class="text-xs text-slate-400 font-mono italic max-w-[280px] truncate">Reference: None</span>
+                
+                <div id="paginationControls" class="flex space-x-3 items-center hidden">
+                    <button id="prevPageAction" class="bg-slate-800 hover:bg-slate-700 active:bg-slate-600 px-3 py-1 rounded-md text-xs font-bold transition-colors cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed">&larr; Prev</button>
+                    <span class="text-xs font-mono text-slate-300">Page <span id="currentPageNum" class="font-bold text-indigo-400">1</span> / <span id="totalPageCounter">1</span></span>
+                    <button id="nextPageAction" class="bg-slate-800 hover:bg-slate-700 active:bg-slate-600 px-3 py-1 rounded-md text-xs font-bold transition-colors cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed">Next &rarr;</button>
+                </div>
+            </div>
+            
+            <div class="flex-1 overflow-auto flex flex-col items-center p-6 bg-slate-950 min-h-0 relative">
+                <canvas id="pdfRenderingCanvas" class="hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.7)] bg-white max-w-full rounded border border-slate-800 mb-auto mt-0"></canvas>
+                <img id="imageContainerViewer" class="hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.7)] max-w-full object-contain rounded border border-slate-800 mb-auto mt-0" alt="Active View Frame">
+                
+                <div id="emptyViewerPlaceholder" class="text-center max-w-sm px-4 my-auto">
+                    <div class="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center mx-auto mb-3 border border-slate-800">
+                        <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                    </div>
+                    <p class="text-sm font-semibold text-slate-400">No Document Rendered</p>
+                    <p class="text-xs text-slate-600 mt-1">Upload a file, scan directory, or select from the Log Viewer.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT: Tabbed Audit View -->
+        <section class="w-1/2 flex flex-col bg-slate-900/20 relative">
+            <!-- Tab bar -->
+            <div class="px-5 py-2 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between shadow-sm">
+                <div class="flex items-center space-x-1">
+                    <button class="audit-tab active text-[11px] font-bold px-3 py-1.5 rounded-t cursor-pointer transition-colors" data-tab="form">Form Fields</button>
+                    <button class="audit-tab text-[11px] font-bold px-3 py-1.5 rounded-t cursor-pointer transition-colors text-slate-500 hover:text-slate-300" data-tab="l1">L1 Compliance</button>
+                    <button class="audit-tab text-[11px] font-bold px-3 py-1.5 rounded-t cursor-pointer transition-colors text-slate-500 hover:text-slate-300" data-tab="l2">L2 Sanity</button>
+                    <span id="activePageIndicatorBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 ml-2 hidden">Page: 1</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span class="text-[10px] font-mono px-2 py-0.5 rounded shadow-sm" id="editorState">Idle</span>
+                </div>
+            </div>
+
+            <!-- Tab content: Form Fields -->
+            <div id="tabForm" class="tab-content flex-1 p-6 overflow-auto bg-slate-950/20 flex flex-col min-h-0">
+                <div id="humanReadableContainer" class="w-full flex-1 p-6 bg-slate-900/40 border border-slate-800/60 rounded-xl font-sans text-sm text-slate-200 shadow-inner overflow-auto space-y-4">
+                    <div class="text-slate-500 italic font-mono text-xs">// Text fields from your document registry pipeline will populate here for human review...</div>
+                </div>
+            </div>
+
+            <!-- Tab content: L1 Compliance -->
+            <div id="tabL1" class="tab-content hidden flex-1 p-6 overflow-auto bg-slate-950/20 min-h-0">
+                <div id="l1ReportContainer" class="w-full p-6 bg-slate-900/40 border border-slate-800/60 rounded-xl shadow-inner overflow-auto space-y-4">
+                    <div class="text-slate-500 italic font-mono text-xs">No compliance check run yet. Load a document and click "Run L1" from the Form Fields tab.</div>
+                </div>
+            </div>
+
+            <!-- Tab content: L2 Sanity -->
+            <div id="tabL2" class="tab-content hidden flex-1 p-6 overflow-auto bg-slate-950/20 min-h-0">
+                <div id="l2ReportContainer" class="w-full p-6 bg-slate-900/40 border border-slate-800/60 rounded-xl shadow-inner overflow-auto space-y-4">
+                    <div class="text-slate-500 italic font-mono text-xs">No sanity check run yet. Load a document and click "Run L2" from the Form Fields tab.</div>
+                </div>
+            </div>
+
+            <!-- Run buttons (shown on Form Fields tab only) -->
+            <div id="auditRunBar" class="hidden px-5 py-2 bg-slate-900/40 border-t border-slate-800 flex items-center space-x-2">
+                <button id="submitToCheckerBtn" class="hidden bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1 rounded text-xs tracking-wide transition-all shadow-md cursor-pointer uppercase">
+                    Run L1 Compliance
+                </button>
+                <button id="runSanityBtn" class="hidden bg-violet-600 hover:bg-violet-500 text-white font-bold px-3 py-1 rounded text-xs tracking-wide transition-all shadow-md cursor-pointer uppercase">
+                    Run L2 Sanity Check
+                </button>
+                <span id="auditRunStatus" class="text-[10px] font-mono text-slate-500 ml-auto"></span>
+            </div>
+        </section>
+
+        <!-- ===== LOG VIEWER OVERLAY ===== -->
+        <div id="logViewerPanel" class="hidden absolute top-0 right-0 h-full w-[420px] bg-slate-900 border-l border-slate-700 shadow-2xl z-30 flex flex-col log-slide-in">
+            <div class="px-5 py-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                    <span class="text-sm font-bold text-white tracking-wide">Document Log</span>
+                    <span id="logTotalBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">0 docs</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button id="refreshLogsBtn" class="text-xs text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer" title="Refresh">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    </button>
+                    <button id="closeLogBtn" class="text-xs text-slate-400 hover:text-rose-400 font-bold uppercase tracking-wider transition-colors cursor-pointer">Close</button>
+                </div>
+            </div>
+
+            <!-- Filter tabs -->
+            <div class="px-5 py-2 bg-slate-900/50 border-b border-slate-800 flex space-x-1">
+                <button class="log-filter-tab text-[10px] font-mono px-3 py-1 rounded bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 cursor-pointer" data-filter="">All</button>
+                <button class="log-filter-tab text-[10px] font-mono px-3 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700 cursor-pointer hover:bg-slate-700" data-filter="ocr_complete">OCR Done</button>
+                <button class="log-filter-tab text-[10px] font-mono px-3 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700 cursor-pointer hover:bg-slate-700" data-filter="compliance_checked">Checked</button>
+                <button class="log-filter-tab text-[10px] font-mono px-3 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700 cursor-pointer hover:bg-slate-700" data-filter="pending">Pending</button>
+                <button class="log-filter-tab text-[10px] font-mono px-3 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700 cursor-pointer hover:bg-slate-700" data-filter="failed">Failed</button>
+            </div>
+
+            <!-- Document list -->
+            <div id="logDocumentList" class="flex-1 overflow-auto p-4 space-y-2">
+                <div class="text-center text-slate-500 text-xs font-mono py-8">Loading documents...</div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        const FASTAPI_BASE_URL = "http://127.0.0.1:8000";
+
+        let globalTargetBaseFilename = "";
+        let globalPdfDocumentReference = null;
+        let globalActivePageNumber = 1;
+        let parsedPagesContentMap = {};
+        let globalCurrentPdfBlobUrl = null;
+
+        // DOM refs
+        const docFileInput = document.getElementById('docFileInput');
+        const targetDocNameDisplay = document.getElementById('targetDocNameDisplay');
+        const viewerToolbar = document.getElementById('viewerToolbar');
+        const paginationControls = document.getElementById('paginationControls');
+        const pdfRenderingCanvas = document.getElementById('pdfRenderingCanvas');
+        const imageContainerViewer = document.getElementById('imageContainerViewer');
+        const emptyViewerPlaceholder = document.getElementById('emptyViewerPlaceholder');
+        const humanReadableContainer = document.getElementById('humanReadableContainer');
+        const statusBadge = document.getElementById('statusBadge');
+        const editorState = document.getElementById('editorState');
+        const currentPageNum = document.getElementById('currentPageNum');
+        const totalPageCounter = document.getElementById('totalPageCounter');
+        const activePageIndicatorBadge = document.getElementById('activePageIndicatorBadge');
+        const submitToCheckerBtn = document.getElementById('submitToCheckerBtn');
+        const runSanityBtn = document.getElementById('runSanityBtn');
+        const l1ReportContainer = document.getElementById('l1ReportContainer');
+        const l2ReportContainer = document.getElementById('l2ReportContainer');
+        const auditRunBar = document.getElementById('auditRunBar');
+        const auditRunStatus = document.getElementById('auditRunStatus');
+
+        // ===== TAB SWITCHING =====
+        function switchTab(tabName) {
+            document.querySelectorAll('.audit-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.audit-tab[data-tab="${tabName}"]`).classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+            const tabMap = { form: 'tabForm', l1: 'tabL1', l2: 'tabL2' };
+            document.getElementById(tabMap[tabName]).classList.remove('hidden');
+            // Show run bar only on form tab
+            auditRunBar.classList.toggle('hidden', tabName !== 'form');
+        }
+
+        document.querySelectorAll('.audit-tab').forEach(tab => {
+            tab.onclick = () => switchTab(tab.getAttribute('data-tab'));
+        });
+
+        // ===== STATUS BADGE HELPER =====
+        function setStatus(text, type) {
+            const colors = {
+                info: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+                success: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+                error: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+                processing: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+            };
+            statusBadge.textContent = text;
+            statusBadge.className = `text-[11px] font-mono px-3 py-1 rounded-md border ${colors[type] || colors.info} block ${type === 'info' ? 'animate-pulse' : 'font-semibold'}`;
+        }
+
+        // ===== PDF LOADING =====
+        function loadPdfFromUrl(url, filename) {
+            globalTargetBaseFilename = filename;
+            targetDocNameDisplay.textContent = `File: "${filename}.pdf"`;
+            viewerToolbar.style.opacity = "1";
+            emptyViewerPlaceholder.classList.add('hidden');
+            imageContainerViewer.classList.add('hidden');
+            pdfRenderingCanvas.classList.remove('hidden');
+            paginationControls.classList.remove('hidden');
+
+            if (globalCurrentPdfBlobUrl) URL.revokeObjectURL(globalCurrentPdfBlobUrl);
+            globalCurrentPdfBlobUrl = url;
+
+            pdfjsLib.getDocument(url).promise.then(function(doc) {
+                globalPdfDocumentReference = doc;
+                totalPageCounter.textContent = doc.numPages;
+                globalActivePageNumber = 1;
+                executePdfPageRenderTask(globalActivePageNumber);
+            });
+        }
+
+        function executePdfPageRenderTask(targetSelectedPageNumber) {
+            globalPdfDocumentReference.getPage(targetSelectedPageNumber).then(function(page) {
+                const ctx = pdfRenderingCanvas.getContext('2d');
+                const viewport = page.getViewport({ scale: 1.3 });
+                pdfRenderingCanvas.height = viewport.height;
+                pdfRenderingCanvas.width = viewport.width;
+                page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function() {
+                    globalActivePageNumber = targetSelectedPageNumber;
+                    currentPageNum.textContent = targetSelectedPageNumber;
+                    document.getElementById('prevPageAction').disabled = (targetSelectedPageNumber <= 1);
+                    document.getElementById('nextPageAction').disabled = (targetSelectedPageNumber >= globalPdfDocumentReference.numPages);
+                    updateRightPanelContent(globalActivePageNumber);
+                });
+            });
+        }
+
+        document.getElementById('prevPageAction').onclick = () => { if (globalActivePageNumber > 1) executePdfPageRenderTask(globalActivePageNumber - 1); };
+        document.getElementById('nextPageAction').onclick = () => { if (globalActivePageNumber < globalPdfDocumentReference.numPages) executePdfPageRenderTask(globalActivePageNumber + 1); };
+
+        // ===== RIGHT PANEL: EDITABLE FIELDS =====
+        function renderEditableFormFields(rawText) {
+            if (!rawText) return `<div class="text-slate-500 italic font-mono text-xs bg-slate-900/20 p-4 rounded-lg border border-slate-800">[Blank Page or No Content Extracted]</div>`;
+
+            const lines = rawText.split('\n');
+
+            // --- Pre-classify each non-empty line ---
+            const classified = [];  // {type, index, line, ...}
+            for (let i = 0; i < lines.length; i++) {
+                const raw = lines[i];
+                const trimmed = raw.trim();
+                if (!trimmed) { classified.push({ type: 'blank', index: i }); continue; }
+
+                // Table tags
+                if (trimmed.toLowerCase().startsWith('<table')) { classified.push({ type: 'table_open', index: i }); continue; }
+                if (trimmed.toLowerCase().startsWith('</table>')) { classified.push({ type: 'table_close', index: i }); continue; }
+
+                // Horizontal rule
+                if (trimmed === '---') { classified.push({ type: 'hr', index: i }); continue; }
+
+                // Headings
+                const headingMatch = trimmed.match(/^(#{1,3})\s+(.*)/);
+                if (headingMatch) {
+                    const level = headingMatch[1].length;
+                    classified.push({ type: 'heading', index: i, level, text: headingMatch[2] });
+                    continue;
+                }
+
+                // Checkboxes
+                if (/^[☐☑]/.test(trimmed) || trimmed.startsWith('- ☐') || trimmed.startsWith('- ☑')) {
+                    const isChecked = trimmed.includes('☑');
+                    const clean = trimmed.replace(/^(-\s+)?([☐☑])\s*/, '');
+                    classified.push({ type: 'checkbox', index: i, checked: isChecked, label: clean });
+                    continue;
+                }
+
+                // Key-value on same line: **Key** : Value  OR  Key : Value
+                const kvMatch = trimmed.match(/^(\*\*.*?\*\*|[^:]+)\s*:\s*(.*)$/);
+                if (kvMatch && kvMatch[2].trim().length > 0) {
+                    const label = kvMatch[1].replace(/\*\*/g, '').trim();
+                    let value = kvMatch[2].trim();
+                    if (/^\*?\(?blank\)?\*?$/i.test(value) || value === '[MISSING / EMPTY DATA FIELD]') value = '';
+                    classified.push({ type: 'kv_same_line', index: i, label, value });
+                    continue;
+                }
+
+                // Bold field on its own line: **Kota* (City)** — value is on next line
+                const boldFieldMatch = trimmed.match(/^\*\*(.+?)\*\*\s*$/);
+                if (boldFieldMatch) {
+                    classified.push({ type: 'bold_field', index: i, label: boldFieldMatch[1].replace(/\*/g, '').trim() });
+                    continue;
+                }
+
+                // Plain text — could be a value following a heading or bold field
+                classified.push({ type: 'text', index: i, text: trimmed });
+            }
+
+            // --- Second pass: merge heading/bold_field + following text into label+textbox pairs ---
+            let htmlFormElements = [];
+            let tableBuffer = [];
+            let inTable = false;
+
+            for (let i = 0; i < classified.length; i++) {
+                const item = classified[i];
+
+                if (item.type === 'blank') continue;
+
+                if (item.type === 'table_open') { inTable = true; tableBuffer = []; continue; }
+                if (item.type === 'table_close') { inTable = false; htmlFormElements.push(buildTableHtmlMatrix(tableBuffer, item.index)); continue; }
+                if (inTable) { tableBuffer.push(lines[item.index]); continue; }
+
+                if (item.type === 'hr') { htmlFormElements.push(`<hr class="border-slate-800 my-3">`); continue; }
+
+                if (item.type === 'heading') {
+                    const tag = item.level === 1 ? 'h1' : item.level === 2 ? 'h2' : 'h3';
+                    const cls = item.level === 1
+                        ? 'text-base font-black text-white bg-slate-900/80 px-3 py-1.5 rounded border border-slate-800 tracking-wider mb-3'
+                        : item.level === 2
+                        ? 'text-sm font-extrabold text-cyan-400 mt-5 mb-2 tracking-wide'
+                        : 'text-xs font-bold text-indigo-400 mt-4 mb-2 uppercase tracking-wide border-b border-slate-800/60 pb-1';
+                    htmlFormElements.push(`<${tag} class="${cls}">${item.text}</${tag}>`);
+                    continue;
+                }
+
+                if (item.type === 'checkbox') {
+                    const fieldId = `chk_line_${item.index}`;
+                    htmlFormElements.push(`<div class="flex items-center space-x-3 bg-slate-900/20 px-3 py-2 rounded border border-slate-800/40 hover:border-slate-700/60 transition-colors"><input type="checkbox" id="${fieldId}" data-line-index="${item.index}" ${item.checked ? 'checked' : ''} class="w-4 h-4 rounded text-indigo-600 bg-slate-950 border-slate-700 focus:ring-indigo-500 cursor-pointer target-form-input"><label for="${fieldId}" class="text-xs font-medium text-slate-300 cursor-pointer flex-1">${item.label}</label></div>`);
+                    continue;
+                }
+
+                if (item.type === 'kv_same_line') {
+                    htmlFormElements.push(makeTextboxHtml(item.index, item.label, item.value));
+                    continue;
+                }
+
+                if (item.type === 'bold_field') {
+                    // Look ahead for the next non-blank, non-heading text line as the value
+                    let valueText = '';
+                    let consumedNext = false;
+                    for (let j = i + 1; j < classified.length; j++) {
+                        const next = classified[j];
+                        if (next.type === 'blank') continue;
+                        if (next.type === 'text') {
+                            valueText = next.text;
+                            consumedNext = true;
+                        }
+                        break;
+                    }
+                    if (/^\*?\(?blank\)?\*?$/i.test(valueText)) valueText = '';
+                    htmlFormElements.push(makeTextboxHtml(item.index, item.label, valueText, consumedNext ? classified[i + 1] : null));
+                    continue;
+                }
+
+                if (item.type === 'text') {
+                    // Check if the PREVIOUS non-blank item was a heading — if so, this is a value line
+                    // that was already consumed by a bold_field or heading. Check if it was consumed.
+                    // Simple heuristic: if previous item was heading and this looks like a value
+                    // (not a heading, not a checkbox), make it a textbox paired with the heading.
+                    let prevNonBlank = null;
+                    for (let j = i - 1; j >= 0; j--) {
+                        if (classified[j].type !== 'blank') { prevNonBlank = classified[j]; break; }
+                    }
+
+                    if (prevNonBlank && prevNonBlank.type === 'heading') {
+                        // This text is the value for the heading above
+                        let valueText = item.text;
+                        if (/^\*?\(?blank\)?\*?$/i.test(valueText)) valueText = '';
+                        // Use a shortened label from the heading
+                        const label = prevNonBlank.text.replace(/\*+/g, '').trim();
+                        htmlFormElements.push(makeTextboxHtml(item.index, label, valueText, item));
+                    } else {
+                        // Standalone text — render as paragraph
+                        htmlFormElements.push(`<p class="text-xs text-slate-400 bg-slate-900/5 px-1 font-sans italic leading-relaxed" data-line-index="${item.index}" data-type="raw-paragraph">${item.text}</p>`);
+                    }
+                    continue;
+                }
+            }
+            return `<div class="space-y-3">${htmlFormElements.join('')}</div>`;
+        }
+
+        function makeTextboxHtml(lineIndex, labelText, valueText, consumedItem) {
+            const fieldId = `txt_line_${lineIndex}`;
+            const useTextarea = valueText.length > 50;
+            // consumedItem means this textbox was built from a heading/bold_field + following text pair
+            // data-line-index points to the VALUE line; reassemble writes just the value back
+            const isMerged = !!consumedItem;
+            const rewriteMode = isMerged ? ' value_only' : ' key_value';
+            const extraAttrs = ` data-rewrite-mode="${rewriteMode}"`;
+            if (useTextarea) {
+                return `<div class="flex flex-col space-y-1 bg-slate-900/10 p-2.5 rounded border border-slate-800/40"><label class="text-[11px] font-mono text-slate-400 font-semibold tracking-wide">${labelText}</label><textarea id="${fieldId}" data-line-index="${lineIndex}" data-key-name="${labelText}" rows="2" class="w-full text-xs bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500 font-sans tracking-wide target-form-input"${extraAttrs}>${valueText}</textarea></div>`;
+            }
+            return `<div class="flex flex-col space-y-1 bg-slate-900/10 p-2.5 rounded border border-slate-800/40"><label class="text-[11px] font-mono text-slate-400 font-semibold tracking-wide">${labelText}</label><input type="text" id="${fieldId}" data-line-index="${lineIndex}" data-key-name="${labelText}" value="${valueText}" class="w-full text-xs bg-slate-950 border border-slate-800 rounded h-8 px-2 text-slate-200 focus:outline-none focus:border-indigo-500 font-sans tracking-wide target-form-input" placeholder="[empty]"${extraAttrs}></div>`;
+        }
+
+        function buildTableHtmlMatrix(tableLines, blockIndex) {
+            let tableContent = tableLines.join('\n');
+            const trMatches = tableContent.match(/<tr[\s\S]*?>([\s\S]*?)<\/tr>/g);
+            if (!trMatches) return `<div class="text-slate-600 font-mono text-xs">[Unparsed Table Node Block]</div>`;
+            let tableHtml = `<div class="overflow-x-auto my-4 border border-slate-800 rounded-lg bg-slate-900/30 p-2" data-type="table-block" data-block-index="${blockIndex}"><table class="w-full text-xs text-left border-collapse">`;
+            trMatches.forEach((trContent, rIdx) => {
+                const isHeader = trContent.includes('<th');
+                tableHtml += `<tr class="${isHeader ? 'border-b border-slate-800 bg-slate-900/60' : 'border-b border-slate-800/50 hover:bg-slate-900/20 transition-colors'}">`;
+                const cellMatches = trContent.match(/<(th|td)[\s\S]*?>([\s\S]*?)<\/\1>/g);
+                if (cellMatches) {
+                    cellMatches.forEach((cell, cIdx) => {
+                        let innerText = cell.replace(/<[\s\S]*?>/g, '').trim();
+                        if (isHeader) {
+                            tableHtml += `<th class="p-2 font-mono text-slate-400 font-bold uppercase tracking-wider">${innerText}</th>`;
+                        } else {
+                            tableHtml += `<td class="p-2 min-w-[100px]">`;
+                            if (innerText === '' || innerText === '*(blank)*') innerText = '';
+                            const containsCheckbox = /^[☐☑]/.test(innerText);
+                            if (containsCheckbox) {
+                                const isChecked = innerText.startsWith('☑');
+                                const cleanLabel = innerText.substring(1).trim();
+                                tableHtml += `<div class="flex items-center space-x-2"><input type="checkbox" data-table-coord="${rIdx}-${cIdx}" data-type="table-chk" ${isChecked ? 'checked' : ''} class="w-3.5 h-3.5 rounded text-indigo-600 bg-slate-950 border-slate-700 focus:ring-indigo-500 cursor-pointer target-table-cell-input"><span class="text-slate-300 font-sans select-none">${cleanLabel}</span></div>`;
+                            } else {
+                                tableHtml += `<input type="text" data-table-coord="${rIdx}-${cIdx}" data-type="table-txt" value="${innerText}" class="w-full bg-slate-950/50 border border-slate-800 rounded px-1.5 py-1 text-slate-200 focus:outline-none focus:border-indigo-500 target-table-cell-input" placeholder="...">`;
+                            }
+                            tableHtml += `</td>`;
+                        }
+                    });
+                }
+                tableHtml += `</tr>`;
+            });
+            tableHtml += `</table></div>`;
+            return tableHtml;
+        }
+
+        function attachFormEventListeners(pageNo) {
+            const container = document.getElementById('humanReadableContainer');
+            const reassembleFormState = () => {
+                const originalLines = parsedPagesContentMap[pageNo].split('\n');
+                const activeBlocks = container.children[0].children;
+                Array.from(activeBlocks).forEach(block => {
+                    if (block.getAttribute('data-type') === 'table-block') {
+                        let newTableRows = ['<table>'];
+                        const rows = block.querySelectorAll('tr');
+                        rows.forEach(row => {
+                            newTableRows.push('  <tr>');
+                            const ths = row.querySelectorAll('th');
+                            if (ths.length > 0) { ths.forEach(th => newTableRows.push(`    <th>${th.innerText.trim()}</th>`)); }
+                            else { row.querySelectorAll('.target-table-cell-input').forEach(input => { newTableRows.push('    <td>'); if (input.getAttribute('data-type') === 'table-chk') { const labelText = input.nextElementSibling.innerText.trim(); newTableRows.push(`${input.checked ? '☑' : '☐'} ${labelText}`); } else { newTableRows.push(input.value.trim()); } newTableRows.push('    </td>'); }); }
+                            newTableRows.push('  </tr>');
+                        });
+                        newTableRows.push('</table>');
+                        originalLines[block.getAttribute('data-block-index')] = newTableRows.join('\n');
+                        return;
+                    }
+                    const textInput = block.querySelector('input[type="text"], textarea');
+                    if (textInput) {
+                        const key = textInput.getAttribute('data-key-name');
+                        const val = textInput.value.trim() === '' ? '*(blank)*' : textInput.value.trim();
+                        const rewriteMode = textInput.getAttribute('data-rewrite-mode') || ' key_value';
+                        const lineIdx = parseInt(textInput.getAttribute('data-line-index'));
+                        if (rewriteMode.includes('value_only')) {
+                            // Merged pair (heading+value or bold_field+value): write just the value
+                            originalLines[lineIdx] = val;
+                        } else {
+                            // Same-line key-value: write **key** : value
+                            originalLines[lineIdx] = `**${key}** : ${val}`;
+                        }
+                        return;
+                    }
+                    const checkboxInput = block.querySelector('input[type="checkbox"]');
+                    if (checkboxInput) { const labelText = block.querySelector('label').innerText.trim(); originalLines[parseInt(checkboxInput.getAttribute('data-line-index'))] = `${checkboxInput.checked ? '☑' : '☐'} ${labelText}`; return; }
+                });
+                parsedPagesContentMap[pageNo] = originalLines.join('\n');
+                editorState.textContent = `PAGE_${pageNo}_EDITED`;
+                editorState.className = "text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 shadow-sm font-bold";
+            };
+            container.querySelectorAll('.target-form-input, .target-table-cell-input').forEach(input => {
+                input.addEventListener('input', reassembleFormState);
+                if (input.type === 'checkbox') input.addEventListener('change', reassembleFormState);
+            });
+        }
+
+        function updateRightPanelContent(pageNo) {
+            activePageIndicatorBadge.textContent = `Page: ${pageNo}`;
+            activePageIndicatorBadge.classList.remove('hidden');
+            const rawContent = parsedPagesContentMap[pageNo];
+            humanReadableContainer.innerHTML = renderEditableFormFields(rawContent);
+            attachFormEventListeners(pageNo);
+            editorState.textContent = `PAGE_${pageNo}_SYNCED`;
+            editorState.className = "text-[10px] text-emerald-400 font-mono px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 shadow-sm font-bold";
+        }
+
+        function storeJsonArray(targetArray) {
+            if (!targetArray) return;
+            parsedPagesContentMap = {};
+            targetArray.forEach(item => { parsedPagesContentMap[item.page] = item.text; });
+            submitToCheckerBtn.classList.remove('hidden');
+            runSanityBtn.classList.remove('hidden');
+            auditRunBar.classList.remove('hidden');
+        }
+
+        // ===== COMPLIANCE REPORT DISPLAY =====
+        function displayComplianceReport(report) {
+            let html = `<div class="space-y-4">`;
+
+            const scoreColor = report.completeness_score >= 90 ? 'text-emerald-400' : report.completeness_score >= 70 ? 'text-amber-400' : 'text-rose-400';
+            const barColor = report.completeness_score >= 90 ? 'bg-emerald-500' : report.completeness_score >= 70 ? 'bg-amber-500' : 'bg-rose-500';
+            html += `
+                <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-bold text-white tracking-wide">Compliance Report</span>
+                        <span class="text-lg font-black ${scoreColor}">${report.completeness_score}%</span>
+                    </div>
+                    <div class="w-full bg-slate-800 rounded-full h-2 mb-3">
+                        <div class="h-2 rounded-full ${barColor}" style="width: ${report.completeness_score}%"></div>
+                    </div>
+                    <div class="text-xs text-slate-400 font-mono">
+                        ${report.passed_checks}/${report.total_checks} checks passed &middot; Status: <span class="${scoreColor} font-bold">${report.overall_status.toUpperCase()}</span>
+                    </div>
+                </div>`;
+
+            if (report.missing_fields && report.missing_fields.length > 0) {
+                html += `<div class="bg-rose-500/5 border border-rose-500/20 rounded-lg p-4"><h3 class="text-xs font-bold text-rose-400 uppercase tracking-wider mb-3">Missing Required Fields (${report.missing_fields.length})</h3><div class="space-y-1">`;
+                report.missing_fields.forEach(m => {
+                    html += `<div class="text-xs text-slate-300 font-mono flex items-center space-x-2"><span class="text-rose-500">✗</span><span>Page ${m.page}: <span class="text-white font-semibold">${m.label || m.field}</span></span></div>`;
+                });
+                html += `</div></div>`;
+            }
+
+            if (report.warnings && report.warnings.length > 0) {
+                html += `<div class="bg-amber-500/5 border border-amber-500/20 rounded-lg p-4"><h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider mb-3">Warnings</h3><div class="space-y-1">`;
+                report.warnings.forEach(w => {
+                    html += `<div class="text-xs text-slate-300 font-mono flex items-center space-x-2"><span class="text-amber-500">⚠</span><span>${w}</span></div>`;
+                });
+                html += `</div></div>`;
+            }
+
+            if (report.sections) {
+                Object.entries(report.sections).forEach(([key, section]) => {
+                    const sectionTitle = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                    const sectionColor = section.status === 'complete' ? 'text-emerald-400' : 'text-rose-400';
+                    html += `<div class="bg-slate-900/30 border border-slate-800/60 rounded-lg p-3"><div class="flex items-center justify-between mb-2"><span class="text-xs font-bold text-slate-300 uppercase tracking-wider">${sectionTitle}</span><span class="text-[10px] font-mono ${sectionColor} px-2 py-0.5 rounded bg-slate-800">${section.status}</span></div>`;
+                    if (section.details && Array.isArray(section.details)) {
+                        section.details.forEach(d => {
+                            const icon = d.status === 'present' ? '<span class="text-emerald-500">✓</span>' : '<span class="text-rose-500">✗</span>';
+                            html += `<div class="text-[11px] font-mono text-slate-400 flex items-center space-x-2 py-0.5">${icon}<span>${d.label || d.field}:</span><span class="text-slate-200">${Array.isArray(d.value) ? d.value.join(', ') : (d.value || '(blank)')}</span></div>`;
+                        });
+                    }
+                    if (section.issues && section.issues.length > 0) {
+                        section.issues.forEach(issue => { html += `<div class="text-[11px] font-mono text-rose-400 py-0.5">✗ ${issue}</div>`; });
+                    }
+                    html += `</div>`;
+                });
+            }
+            html += `</div>`;
+            l1ReportContainer.innerHTML = html;
+        }
+
+        // ===== COMPLIANCE CHECK BUTTON =====
+        submitToCheckerBtn.onclick = async () => {
+            const validationPayload = Object.keys(parsedPagesContentMap).map(pageKey => ({
+                page: parseInt(pageKey),
+                text: parsedPagesContentMap[pageKey]
+            }));
+            setStatus("Running L1 compliance check...", "info");
+
+            try {
+                const checkResponse = await fetch(`${FASTAPI_BASE_URL}/api/check-compliance`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: globalTargetBaseFilename, payload: validationPayload })
+                });
+                if (!checkResponse.ok) throw new Error("Audit pipeline returned error.");
+                const auditResult = await checkResponse.json();
+                displayComplianceReport(auditResult.report);
+                switchTab('l1');
+                setStatus(`L1: ${auditResult.report.completeness_score}% — ${auditResult.report.overall_status.toUpperCase()}`, auditResult.report.overall_status === 'complete' ? 'success' : 'info');
+            } catch (err) {
+                setStatus(`L1 FAILED: ${err.message}`, "error");
+            }
+        };
+
+        // ===== LEVEL 2 SANITY CHECK =====
+        function renderStoredSanityReport(analysis, extractedData) {
+            // Lightweight version for appending below L1 — same visual as displaySanityReport
+            if (!analysis || !analysis.overall_assessment) return '';
+            const assessColors = { pass: 'text-emerald-400', review_needed: 'text-amber-400', fail: 'text-rose-400' };
+            const assessBg = { pass: 'bg-emerald-500/10 border-emerald-500/20', review_needed: 'bg-amber-500/10 border-amber-500/20', fail: 'bg-rose-500/10 border-rose-500/20' };
+            const assess = analysis.overall_assessment;
+            const conf = analysis.confidence != null ? `${(analysis.confidence * 100).toFixed(0)}%` : '—';
+            const sevColors = { critical: 'rose', warning: 'amber', info: 'slate' };
+
+            let html = `<hr class="border-slate-800 my-4"><div class="space-y-3">`;
+            html += `<div class="${assessBg[assess] || 'bg-slate-800 border-slate-700'} border rounded-lg p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-bold text-white tracking-wide">L2 Sanity Check (stored)</span>
+                    <span class="text-lg font-black ${assessColors[assess] || 'text-slate-400'}">${assess.replace('_', ' ').toUpperCase()}</span>
+                </div>
+                <div class="text-xs text-slate-400 font-mono">Confidence: <span class="text-white font-bold">${conf}</span> &middot; Issues: <span class="text-white font-bold">${(analysis.issues || []).length}</span></div>
+            </div>`;
+
+            (analysis.issues || []).forEach(issue => {
+                const color = sevColors[issue.severity] || 'slate';
+                html += `<div class="bg-${color}-500/5 border border-${color}-500/20 rounded-lg p-3">
+                    <div class="flex items-center space-x-2 mb-1">
+                        <span class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-${color}-500/20 text-${color}-400 uppercase">${issue.severity}</span>
+                        <span class="text-xs font-bold text-white">${issue.field || 'general'}</span>
+                    </div>
+                    <p class="text-xs text-slate-300 leading-relaxed">${issue.description}</p>
+                    ${issue.suggestion ? `<p class="text-[11px] text-${color}-400 mt-1.5 font-mono">→ ${issue.suggestion}</p>` : ''}
+                </div>`;
+            });
+
+            if (analysis.summary) {
+                html += `<div class="bg-slate-900/40 border border-slate-800/60 rounded-lg p-4">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">LLM Summary</h4>
+                    <p class="text-xs text-slate-300 leading-relaxed">${analysis.summary}</p>
+                </div>`;
+            }
+
+            html += `</div>`;
+            return html;
+        }
+
+        function displaySanityReport(analysis, extractedData) {
+            let html = `<div class="space-y-4">`;
+
+            // Assessment header
+            const assessColors = { pass: 'text-emerald-400', review_needed: 'text-amber-400', fail: 'text-rose-400' };
+            const assessBg = { pass: 'bg-emerald-500/10 border-emerald-500/20', review_needed: 'bg-amber-500/10 border-amber-500/20', fail: 'bg-rose-500/10 border-rose-500/20' };
+            const assess = analysis.overall_assessment || 'unknown';
+            const conf = analysis.confidence != null ? `${(analysis.confidence * 100).toFixed(0)}%` : '—';
+
+            html += `
+                <div class="${assessBg[assess] || 'bg-slate-800 border-slate-700'} border rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-bold text-white tracking-wide">Level 2 Sanity Check</span>
+                        <span class="text-lg font-black ${assessColors[assess] || 'text-slate-400'}">${assess.replace('_', ' ').toUpperCase()}</span>
+                    </div>
+                    <div class="text-xs text-slate-400 font-mono">
+                        Confidence: <span class="text-white font-bold">${conf}</span> &middot; Issues: <span class="text-white font-bold">${(analysis.issues || []).length}</span>
+                    </div>
+                </div>`;
+
+            // Issues
+            const issues = analysis.issues || [];
+            if (issues.length > 0) {
+                const sevColors = { critical: 'rose', warning: 'amber', info: 'slate' };
+                html += `<div class="space-y-2">`;
+                issues.forEach(issue => {
+                    const color = sevColors[issue.severity] || 'slate';
+                    html += `
+                        <div class="bg-${color}-500/5 border border-${color}-500/20 rounded-lg p-3">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <span class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-${color}-500/20 text-${color}-400 uppercase">${issue.severity}</span>
+                                <span class="text-xs font-bold text-white">${issue.field || 'general'}</span>
+                            </div>
+                            <p class="text-xs text-slate-300 leading-relaxed">${issue.description}</p>
+                            ${issue.suggestion ? `<p class="text-[11px] text-${color}-400 mt-1.5 font-mono">→ ${issue.suggestion}</p>` : ''}
+                        </div>`;
+                });
+                html += `</div>`;
+            }
+
+            // Summary
+            if (analysis.summary) {
+                html += `
+                    <div class="bg-slate-900/40 border border-slate-800/60 rounded-lg p-4">
+                        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">LLM Summary</h4>
+                        <p class="text-xs text-slate-300 leading-relaxed">${analysis.summary}</p>
+                    </div>`;
+            }
+
+            // Collapsible extracted data
+            if (extractedData) {
+                html += `
+                    <details class="bg-slate-900/20 border border-slate-800/40 rounded-lg">
+                        <summary class="text-xs font-bold text-slate-400 uppercase tracking-wider px-4 py-2.5 cursor-pointer hover:text-slate-300">Extracted Structured Data</summary>
+                        <pre class="px-4 pb-4 text-[10px] text-slate-400 font-mono overflow-auto max-h-64">${JSON.stringify(extractedData, null, 2).replace(/</g, '&lt;')}</pre>
+                    </details>`;
+            }
+
+            html += `</div>`;
+            l2ReportContainer.innerHTML = html;
+        }
+
+        runSanityBtn.onclick = async () => {
+            setStatus("Running Level 2 sanity check via LLM...", "info");
+            runSanityBtn.disabled = true;
+
+            try {
+                const response = await fetch(`${FASTAPI_BASE_URL}/api/sanity-check`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: globalTargetBaseFilename,
+                        payload: Object.keys(parsedPagesContentMap).map(k => ({ page: parseInt(k), text: parsedPagesContentMap[k] }))
+                    })
+                });
+                if (!response.ok) throw new Error("Sanity check endpoint error.");
+                const result = await response.json();
+
+                displaySanityReport(result.analysis, result.extracted_data);
+                switchTab('l2');
+
+                const assess = result.analysis.overall_assessment;
+                setStatus(`L2: ${assess.toUpperCase()} (${(result.analysis.confidence * 100).toFixed(0)}%)`,
+                    assess === 'pass' ? 'success' : assess === 'fail' ? 'error' : 'info');
+            } catch (err) {
+                setStatus(`SANITY_CHECK_ERROR: ${err.message}`, "error");
+            } finally {
+                runSanityBtn.disabled = false;
+            }
+        };
+
+        // ===== FILE UPLOAD =====
+        docFileInput.addEventListener('change', async function(event) {
+            const uploadedFileInstance = event.target.files[0];
+            if (!uploadedFileInstance) return;
+            globalTargetBaseFilename = uploadedFileInstance.name.replace(/\.[^/.]+$/, "");
+
+            const uploadMultipartFormPayload = new FormData();
+            uploadMultipartFormPayload.append("file", uploadedFileInstance);
+            setStatus("Pipeline Working: Analyzing files...", "info");
+            editorState.textContent = "ENG_PROCESSING";
+            editorState.className = "text-[10px] text-amber-400 font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 font-bold";
+
+            try {
+                const apiPipelineResponse = await fetch(`${FASTAPI_BASE_URL}/api/upload`, { method: 'POST', body: uploadMultipartFormPayload });
+                if (!apiPipelineResponse.ok) throw new Error("Upload pipeline error.");
+                const dataResponse = await apiPipelineResponse.json();
+
+                storeJsonArray(dataResponse.auto_loaded_json);
+
+                if (dataResponse.processing_executed) {
+                    setStatus("OCR LOOP EXECUTED — CACHE SAVED", "processing");
+                } else {
+                    setStatus("CACHE DETECTED — JSON FETCHED DIRECTLY", "success");
+                }
+
+                const generatedObjectURL = URL.createObjectURL(uploadedFileInstance);
+                loadPdfFromUrl(generatedObjectURL, globalTargetBaseFilename);
+
+                // Refresh log viewer if open
+                if (!document.getElementById('logViewerPanel').classList.contains('hidden')) loadLogDocuments();
+            } catch (err) {
+                setStatus(`PIPELINE_ERROR: ${err.message}`, "error");
+            }
+        });
+
+        // ===== SCAN DIRECTORY =====
+        document.getElementById('scanAllDocsBtn').onclick = async () => {
+            setStatus("Scanning directory for unprocessed PDFs...", "processing");
+            document.getElementById('scanAllDocsBtn').disabled = true;
+
+            try {
+                const response = await fetch(`${FASTAPI_BASE_URL}/api/scan-directory`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ directory: null, run_compliance: true })
+                });
+                if (!response.ok) throw new Error("Scan endpoint error.");
+                const result = await response.json();
+
+                let summary = `Scanned ${result.total_pdfs} PDFs.`;
+                if (result.processed.length > 0) summary += ` Processed: ${result.processed.length}.`;
+                if (result.skipped.length > 0) summary += ` Cached: ${result.skipped.length}.`;
+                if (result.failed.length > 0) summary += ` Failed: ${result.failed.length}.`;
+                setStatus(summary, result.failed.length > 0 ? "error" : "success");
+
+                // Refresh log viewer
+                if (!document.getElementById('logViewerPanel').classList.contains('hidden')) loadLogDocuments();
+            } catch (err) {
+                setStatus(`SCAN_ERROR: ${err.message}`, "error");
+            } finally {
+                document.getElementById('scanAllDocsBtn').disabled = false;
+            }
+        };
+
+        // ===== LOG VIEWER =====
+        const logViewerPanel = document.getElementById('logViewerPanel');
+        const logDocumentList = document.getElementById('logDocumentList');
+
+        document.getElementById('viewLogsBtn').onclick = () => {
+            const isHidden = logViewerPanel.classList.contains('hidden');
+            if (isHidden) {
+                logViewerPanel.classList.remove('hidden');
+                loadLogDocuments();
+            } else {
+                logViewerPanel.classList.add('hidden');
+            }
+        };
+
+        document.getElementById('closeLogBtn').onclick = () => { logViewerPanel.classList.add('hidden'); };
+        document.getElementById('refreshLogsBtn').onclick = () => { loadLogDocuments(); };
+
+        // Filter tabs
+        document.querySelectorAll('.log-filter-tab').forEach(tab => {
+            tab.onclick = () => {
+                document.querySelectorAll('.log-filter-tab').forEach(t => {
+                    t.className = 'log-filter-tab text-[10px] font-mono px-3 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700 cursor-pointer hover:bg-slate-700';
+                });
+                tab.className = 'log-filter-tab text-[10px] font-mono px-3 py-1 rounded bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 cursor-pointer';
+                loadLogDocuments(tab.getAttribute('data-filter'));
+            };
+        });
+
+        async function loadLogDocuments(filter) {
+            logDocumentList.innerHTML = `<div class="text-center text-slate-500 text-xs font-mono py-8">Loading...</div>`;
+            try {
+                const url = filter ? `${FASTAPI_BASE_URL}/api/documents?status=${filter}` : `${FASTAPI_BASE_URL}/api/documents`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                document.getElementById('logTotalBadge').textContent = `${data.total} docs`;
+
+                if (data.documents.length === 0) {
+                    logDocumentList.innerHTML = `<div class="text-center text-slate-500 text-xs font-mono py-8">No documents found${filter ? ` with status "${filter}"` : ''}.</div>`;
+                    return;
+                }
+
+                let html = '';
+                data.documents.forEach(doc => {
+                    const score = doc.completeness_score != null ? `${doc.completeness_score.toFixed(0)}%` : null;
+                    const statusColors = {
+                        pending: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+                        ocr_processing: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+                        ocr_complete: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+                        compliance_checked: score && parseFloat(score) >= 90 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+                        failed: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+                    };
+                    const statusLabel = doc.status.replace(/_/g, ' ');
+                    const borderColor = doc.completeness_score != null && doc.completeness_score < 90 ? 'border-l-amber-500' : doc.completeness_score >= 90 ? 'border-l-emerald-500' : 'border-l-slate-700';
+
+                    html += `
+                        <div class="log-doc-card bg-slate-800/40 border border-slate-700/50 ${borderColor} border-l-2 rounded-lg p-3 hover:bg-slate-800/70 transition-all cursor-pointer group" data-filename="${doc.filename}">
+                            <div class="flex items-center justify-between mb-1.5">
+                                <span class="text-xs font-bold text-white truncate max-w-[200px]">${doc.filename}.pdf</span>
+                                <span class="text-[10px] font-mono px-2 py-0.5 rounded border ${statusColors[doc.status] || 'bg-slate-800 text-slate-400 border-slate-700'}">${statusLabel}</span>
+                            </div>
+                            <div class="flex items-center space-x-3 text-[10px] text-slate-400 font-mono flex-wrap">
+                                <span>${doc.pages || 0}p</span>
+                                ${score != null ? `<span class="${parseFloat(score) >= 90 ? 'text-emerald-400' : 'text-amber-400'}" title="L1 Compliance">L1: ${score}</span>` : ''}
+                                ${doc.sanity_status ? `<span class="${doc.sanity_status === 'pass' ? 'text-emerald-400' : doc.sanity_status === 'fail' ? 'text-rose-400' : 'text-amber-400'}" title="L2 Sanity">L2: ${doc.sanity_status}</span>` : ''}
+                                ${doc.missing_fields && doc.missing_fields !== '[]' ? `<span class="text-rose-400">${JSON.parse(doc.missing_fields).length} missing</span>` : ''}
+                            </div>
+                            <div class="mt-2 flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span class="text-[10px] text-indigo-400 font-mono">Click to load PDF →</span>
+                            </div>
+                        </div>`;
+                });
+                logDocumentList.innerHTML = html;
+
+                // Attach click handlers
+                logDocumentList.querySelectorAll('.log-doc-card').forEach(card => {
+                    card.onclick = () => { loadDocumentFromLog(card.getAttribute('data-filename')); };
+                });
+            } catch (err) {
+                logDocumentList.innerHTML = `<div class="text-center text-rose-400 text-xs font-mono py-8">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function loadDocumentFromLog(filename) {
+            setStatus(`Loading ${filename}...`, "info");
+            logViewerPanel.classList.add('hidden');
+
+            try {
+                // 1. Load the PDF file from the server
+                const pdfResponse = await fetch(`${FASTAPI_BASE_URL}/${filename}.pdf`);
+                if (!pdfResponse.ok) throw new Error("PDF file not found on server.");
+                const pdfBlob = await pdfResponse.blob();
+                const pdfUrl = URL.createObjectURL(pdfBlob);
+
+                // 2. Load OCR JSON data
+                const jsonResponse = await fetch(`${FASTAPI_BASE_URL}/${filename}.json`);
+                if (!jsonResponse.ok) throw new Error("OCR JSON not found.");
+                const pages = await jsonResponse.json();
+                storeJsonArray(pages);
+
+                // 3. Load compliance report
+                const complianceResponse = await fetch(`${FASTAPI_BASE_URL}/api/compliance/${filename}`);
+                if (complianceResponse.ok) {
+                    const compData = await complianceResponse.json();
+                    displayComplianceReport(compData.report);
+                    setStatus(`LOADED: ${filename} — L1: ${compData.report.completeness_score}%`, compData.report.overall_status === 'complete' ? 'success' : 'info');
+                } else {
+                    setStatus(`Loaded ${filename}`, "success");
+                }
+
+                // 4. Load stored L2 sanity results if available
+                const sanityResponse = await fetch(`${FASTAPI_BASE_URL}/api/sanity-results/${filename}`);
+                if (sanityResponse.ok) {
+                    const saneData = await sanityResponse.json();
+                    const l2Html = renderStoredSanityReport(saneData.analysis, saneData.extracted_data);
+                    l2ReportContainer.innerHTML = l2Html;
+                }
+
+                // 4. Render the PDF
+                loadPdfFromUrl(pdfUrl, filename);
+
+            } catch (err) {
+                setStatus(`LOAD FAILED: ${err.message}`, "error");
+            }
+        }
+
+        // ===== RESET =====
+        document.getElementById('systemResetBtn').onclick = () => { location.reload(); };
+    </script>
+</body>
+</html>
